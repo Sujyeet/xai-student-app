@@ -1,326 +1,159 @@
+# app.py
+# To run this app:
+# 1. Save this code as `app.py`.
+# 2. Make sure you have a `requirements.txt` file (I'll provide this).
+# 3. In your terminal, run: `streamlit run app.py`
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import shap
 import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
-import warnings
-warnings.filterwarnings('ignore')
+from sklearn.preprocessing import StandardScaler
 
-# Page Configuration
+# --- Page Configuration ---
 st.set_page_config(
-    page_title="Student Performance Prediction - Explainable AI",
+    page_title="Student Performance XAI",
+    page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for professional styling
-st.markdown("""
-<style>
-    .metric-container {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
-    }
-    .success-metric {
-        background-color: #d4edda;
-        border-left: 4px solid #28a745;
-    }
-    .error-metric {
-        background-color: #f8d7da;
-        border-left: 4px solid #dc3545;
-    }
-</style>
-""", unsafe_allow_html=True)
-
+# --- Caching Functions for Performance ---
 @st.cache_data
 def load_data():
-    """Load and validate the student performance dataset."""
+    """Loads the student performance dataset."""
     try:
+        # Assuming 'student-por.csv' is in the same directory as the app.py file.
+        # If you deploy, make sure to upload this CSV to your repository.
         df = pd.read_csv('student-por.csv', encoding='utf-8')
         df.columns = df.columns.str.strip()
         return df
     except FileNotFoundError:
-        st.error("Dataset file 'student-por.csv' not found. Please ensure the file is in the application directory.")
-        return None
-    except Exception as e:
-        st.error(f"Error loading dataset: {str(e)}")
+        st.error("Dataset file 'student-por.csv' not found. Please place it in the same directory as the app.")
         return None
 
 @st.cache_data
 def preprocess_data(_df):
-    """Preprocess data: create target variable, encode features, and split dataset."""
+    """Preprocesses the data: creates target, encodes features, and splits."""
     df = _df.copy()
-    
-    # Create binary target variable
-    df['pass'] = (df['G3'] >= 10).astype(int)
+    # Create the binary target variable 'pass'
+    df['pass'] = df['G3'].apply(lambda x: 1 if x >= 10 else 0)
     df.drop(['G1', 'G2', 'G3'], axis=1, inplace=True)
     
-    # Encode categorical features
+    # One-hot encode categorical features
     df_encoded = pd.get_dummies(df, drop_first=True)
     
     X = df_encoded.drop('pass', axis=1)
     y = df_encoded['pass']
     
-    # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    # Split data for model training and explanation
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     
-    return X_train, X_test, y_train, y_test, X.columns
+    return X_train, X_test, y_train, y_test, X.columns, X
 
 @st.cache_resource
 def train_model(X_train, y_train):
-    """Train and return the Random Forest classifier."""
-    model = RandomForestClassifier(
-        n_estimators=200, 
-        max_depth=10, 
-        random_state=42, 
-        class_weight='balanced'
-    )
+    """Trains the RandomForestClassifier model."""
+    # Using the best parameters from your notebook for demonstration
+    model = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42, class_weight='balanced')
     model.fit(X_train, y_train)
     return model
 
-@st.cache_resource
-def initialize_explainer(_model, X_train):
-    """Initialize SHAP TreeExplainer."""
-    return shap.TreeExplainer(_model)
+# --- Main App UI ---
+st.title("🎓 Explainable AI for Student Performance Prediction")
+st.write(
+    "This interactive application demonstrates how Explainable AI (XAI) can make machine learning models transparent. "
+    "The underlying Random Forest model predicts whether a student will pass or fail based on demographic, social, and school-related features. "
+    "Using **SHAP (SHapley Additive exPlanations)**, we can see *why* the model makes a specific prediction."
+)
 
-def create_shap_force_plot(explainer, shap_values, X_test, student_iloc):
-    """Create SHAP force plot with proper v0.20+ API and matplotlib backend."""
-    try:
-        # Get the single instance data
-        instance_features = X_test.iloc[student_iloc, :]
-        
-        # Handle binary classification SHAP values
-        if isinstance(shap_values, list) and len(shap_values) == 2:
-            # For binary classification, use positive class (index 1)
-            instance_shap_values = shap_values[1][student_iloc, :]
-            base_value = explainer.expected_value[1]
-        else:
-            # Single output case
-            instance_shap_values = shap_values[student_iloc, :]
-            base_value = explainer.expected_value
-            
-        # Create matplotlib force plot (v0.20+ syntax)
-        fig, ax = plt.subplots(figsize=(12, 4))
-        
-        # Use the NEW API: base_value as first parameter
-        shap.plots.force(
-            base_value=base_value,
-            shap_values=instance_shap_values,
-            features=instance_features,
-            feature_names=instance_features.index.tolist(),
-            matplotlib=True,
-            show=False,
-            figsize=(12, 4)
-        )
-        
-        plt.tight_layout()
-        return fig
-        
-    except Exception as e:
-        # Fallback to waterfall plot if force plot fails
-        st.warning(f"Force plot failed, using waterfall plot instead: {str(e)}")
-        return create_shap_waterfall_plot(explainer, shap_values, X_test, student_iloc)
+# --- Load and Process Data ---
+df = load_data()
 
-def create_shap_waterfall_plot(explainer, shap_values, X_test, student_iloc):
-    """Create SHAP waterfall plot as fallback."""
-    try:
-        instance_features = X_test.iloc[student_iloc, :]
-        
-        if isinstance(shap_values, list) and len(shap_values) == 2:
-            instance_shap_values = shap_values[1][student_iloc, :]
-            base_value = explainer.expected_value[1]
-        else:
-            instance_shap_values = shap_values[student_iloc, :]
-            base_value = explainer.expected_value
-        
-        fig, ax = plt.subplots(figsize=(12, 8))
-        
-        # Create waterfall plot
-        shap.plots.waterfall(
-            shap.Explanation(
-                values=instance_shap_values,
-                base_values=base_value,
-                data=instance_features.values,
-                feature_names=instance_features.index.tolist()
-            ),
-            show=False
-        )
-        
-        plt.tight_layout()
-        return fig
-        
-    except Exception as e:
-        st.error(f"Both force and waterfall plots failed: {str(e)}")
-        return None
-
-def create_shap_summary_plot(shap_values, X_test):
-    """Create SHAP summary plot with error handling."""
-    try:
-        fig, ax = plt.subplots(figsize=(10, 8))
-        
-        # Handle different SHAP value formats
-        if isinstance(shap_values, list) and len(shap_values) == 2:
-            shap_values_to_use = shap_values[1]  # Use positive class for binary classification
-        else:
-            shap_values_to_use = shap_values
-            
-        shap.summary_plot(
-            shap_values_to_use, 
-            X_test, 
-            plot_type="bar", 
-            show=False,
-            max_display=15
-        )
-        plt.tight_layout()
-        return fig
-        
-    except Exception as e:
-        st.error(f"Error creating SHAP summary plot: {str(e)}")
-        return None
-
-# Main Application
-def main():
-    st.title("Student Performance Prediction with Explainable AI")
-    st.markdown("""
-    This application demonstrates explainable machine learning for student performance prediction. 
-    The Random Forest model predicts pass/fail outcomes based on student demographics, social factors, 
-    and academic history. SHAP (SHapley Additive exPlanations) provides interpretable explanations 
-    for individual predictions and overall model behavior.
-    """)
-
-    # Load and process data
-    df = load_data()
-    if df is None:
-        st.stop()
-
-    X_train, X_test, y_train, y_test, feature_names = preprocess_data(df)
+if df is not None:
+    X_train, X_test, y_train, y_test, feature_names, X = preprocess_data(df)
     
-    # Train model
-    with st.spinner("Training model..."):
-        model = train_model(X_train, y_train)
-    
-    # Model performance metrics
-    y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-    
+    # Train the model
+    model = train_model(X_train, y_train)
+
     # Initialize SHAP explainer
-    with st.spinner("Initializing SHAP explainer..."):
-        explainer = initialize_explainer(model, X_train)
-        shap_values = explainer.shap_values(X_test)
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X_test)
 
-    # Sidebar controls
-    st.sidebar.header("Analysis Controls")
-    st.sidebar.markdown(f"**Model Accuracy:** {accuracy:.1%}")
-    
+    # --- Sidebar for User Input ---
+    st.sidebar.header("Explore a Prediction")
     selected_student_index = st.sidebar.selectbox(
-        "Select student for individual prediction analysis:",
-        options=list(X_test.index)[:20],  # Limit to first 20 for demo
-        format_func=lambda x: f"Student #{x}"
+        "Select a student from the test set to explain:",
+        options=X_test.index,
+        format_func=lambda x: f"Student Index {x}"
     )
 
-    # Main content layout
+    # --- Main Content Area ---
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        st.subheader("Individual Prediction Analysis")
+        st.subheader("Prediction for Student {}".format(selected_student_index))
         
-        # Get prediction details
-        student_data = X_test.loc[[selected_student_index]]
-        prediction = model.predict(student_data)[0]
-        probability = model.predict_proba(student_data)[0]
-        
-        # Display prediction with styled metrics
-        if prediction == 1:
-            st.markdown(f"""
-            <div class="metric-container success-metric">
-                <h4>Prediction: PASS</h4>
-                <p>Pass Probability: <strong>{probability[1]:.1%}</strong></p>
-                <p>Fail Probability: {probability[0]:.1%}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-            <div class="metric-container error-metric">
-                <h4>Prediction: FAIL</h4>
-                <p>Pass Probability: <strong>{probability[1]:.1%}</strong></p>
-                <p>Fail Probability: {probability[0]:.1%}</p>
-            </div>
-            """, unsafe_allow_html=True)
+        # Get prediction and probability
+        prediction = model.predict(X_test.loc[[selected_student_index]])[0]
+        probability = model.predict_proba(X_test.loc[[selected_student_index]])[0][1]
 
-        st.subheader("Student Profile")
+        if prediction == 1:
+            st.success(f"**Prediction: PASS** (Probability: {probability:.2%})")
+        else:
+            st.error(f"**Prediction: FAIL** (Probability of Passing: {probability:.2%})")
         
-        # Display top features for selected student
-        student_features = X_test.loc[selected_student_index]
-        non_zero_features = student_features[student_features != 0].sort_values(ascending=False)
+        st.write("---")
+        st.subheader("Student's Key Features:")
         
-        if len(non_zero_features) > 0:
-            st.dataframe(
-                non_zero_features.to_frame().rename(columns={selected_student_index: 'Value'}),
-                height=400
-            )
+        # Display the features of the selected student
+        student_features = X.loc[[selected_student_index]].T.rename(columns={selected_student_index: 'Value'})
+        st.dataframe(student_features, height=350)
+
 
     with col2:
-        st.subheader("Individual Explanation")
-        st.markdown("""
-        The plot below shows how each feature influences the model's prediction for this specific student. 
-        Positive values push toward passing, while negative values push toward failing.
-        """)
+        st.subheader("Local Explanation: Why this prediction?")
+        st.write(
+            "This **SHAP Force Plot** shows the features that pushed the model's prediction higher (in red) or lower (in blue). "
+            "The 'base value' is the average prediction over the entire dataset."
+        )
         
-        # Create and display SHAP force plot
+        # We need to find the index in the numpy array that corresponds to the student's original index
         student_iloc = X_test.index.get_loc(selected_student_index)
         
-        with st.spinner("Creating individual explanation plot..."):
-            force_plot_fig = create_shap_force_plot(explainer, shap_values, X_test, student_iloc)
+        # Generate SHAP force plot for the selected student
+        # We explain the model's output for the "Pass" class (class 1)
+        shap_plot = shap.force_plot(
+            explainer.expected_value[1], 
+            shap_values[1][student_iloc, :], 
+            X_test.iloc[student_iloc, :],
+            matplotlib=True,
+            show=False
+        )
+        st.pyplot(shap_plot, bbox_inches='tight')
+        st.write("---")
+        st.subheader("Global Explanation: What drives the model?")
+        st.write(
+            "This summary plot ranks the features by their overall importance to the model's predictions across all students. "
+            "Longer bars indicate more influential features."
+        )
         
-        if force_plot_fig is not None:
-            st.pyplot(force_plot_fig, clear_figure=True)
-        else:
-            st.error("Could not generate individual explanation plot.")
-        
-        st.subheader("Global Model Explanation")
+        # Generate SHAP summary plot
+        fig, ax = plt.subplots()
+        shap.summary_plot(shap_values[1], X_test, plot_type="bar", show=False)
+        st.pyplot(fig, bbox_inches='tight', clear_figure=True)
+
+
+    # --- Expander for more details ---
+    with st.expander("About the Model and Data"):
         st.markdown("""
-        This summary plot shows the most important features across all predictions, 
-        ranked by their average impact on the model's decisions.
+        - **Model:** A `RandomForestClassifier` trained on a dataset of Portuguese students.
+        - **Target:** Predicts if a student's final grade (G3) is >= 10 (Pass) or < 10 (Fail).
+        - **Features:** Include student demographics (`sex`, `age`), family background (`Pstatus`, `Medu`, `Fedu`), school-related factors (`studytime`, `failures`, `absences`), and social aspects (`goout`, `health`).
+        - **Explainability:** SHAP values quantify the impact of each feature on a particular prediction, providing crucial transparency.
         """)
-        
-        # Create and display SHAP summary plot
-        with st.spinner("Creating global explanation plot..."):
-            summary_plot_fig = create_shap_summary_plot(shap_values, X_test)
-        
-        if summary_plot_fig is not None:
-            st.pyplot(summary_plot_fig, clear_figure=True)
-        else:
-            st.error("Could not generate global explanation plot.")
-
-    # Additional information
-    with st.expander("Model and Dataset Information"):
-        col_info1, col_info2 = st.columns(2)
-        
-        with col_info1:
-            st.markdown("""
-            **Model Details:**
-            - Algorithm: Random Forest Classifier
-            - Estimators: 200 trees
-            - Max Depth: 10 levels
-            - Class Weight: Balanced
-            """)
-            
-        with col_info2:
-            st.markdown("""
-            **Dataset Information:**
-            - Source: Student performance in Portuguese course
-            - Target: Pass (grade ≥ 10) vs Fail (grade < 10)
-            - Features: Demographics, family, school, and social factors
-            - Total Samples: {} students
-            """.format(len(df)))
-
-if __name__ == "__main__":
-    main()
+else:
+    st.info("Please upload the 'student-por.csv' dataset to proceed.")
