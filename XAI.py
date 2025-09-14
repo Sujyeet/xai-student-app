@@ -4,7 +4,7 @@ import numpy as np
 import shap
 import matplotlib.pyplot as plt
 import matplotlib
-matplotlib.use('Agg')  # Set non-interactive backend for Streamlit
+matplotlib.use('Agg')
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
@@ -14,7 +14,6 @@ warnings.filterwarnings('ignore')
 # Page Configuration
 st.set_page_config(
     page_title="Student Performance Prediction - Explainable AI",
-    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -31,10 +30,6 @@ st.markdown("""
     .success-metric {
         background-color: #d4edda;
         border-left: 4px solid #28a745;
-    }
-    .warning-metric {
-        background-color: #fff3cd;
-        border-left: 4px solid #ffc107;
     }
     .error-metric {
         background-color: #f8d7da;
@@ -97,42 +92,83 @@ def initialize_explainer(_model, X_train):
     return shap.TreeExplainer(_model)
 
 def create_shap_force_plot(explainer, shap_values, X_test, student_iloc):
-    """Create SHAP force plot with proper error handling."""
+    """Create SHAP force plot with proper v0.20+ API and matplotlib backend."""
     try:
-        # Handle different SHAP value formats
+        # Get the single instance data
+        instance_features = X_test.iloc[student_iloc, :]
+        
+        # Handle binary classification SHAP values
         if isinstance(shap_values, list) and len(shap_values) == 2:
-            # Binary classification with separate arrays for each class
-            shap_vals_to_use = shap_values[1][student_iloc, :]
-            expected_val = explainer.expected_value[1]
+            # For binary classification, use positive class (index 1)
+            instance_shap_values = shap_values[1][student_iloc, :]
+            base_value = explainer.expected_value[1]
         else:
-            # Single array format
-            shap_vals_to_use = shap_values[student_iloc, :]
-            expected_val = explainer.expected_value
+            # Single output case
+            instance_shap_values = shap_values[student_iloc, :]
+            base_value = explainer.expected_value
             
-        # Create the force plot
-        fig = plt.figure(figsize=(12, 3))
-        shap.force_plot(
-            expected_val,
-            shap_vals_to_use,
-            X_test.iloc[student_iloc, :],
+        # Create matplotlib force plot (v0.20+ syntax)
+        fig, ax = plt.subplots(figsize=(12, 4))
+        
+        # Use the NEW API: base_value as first parameter
+        shap.plots.force(
+            base_value=base_value,
+            shap_values=instance_shap_values,
+            features=instance_features,
+            feature_names=instance_features.index.tolist(),
             matplotlib=True,
-            show=False
+            show=False,
+            figsize=(12, 4)
         )
+        
         plt.tight_layout()
         return fig
         
     except Exception as e:
-        st.error(f"Error creating SHAP force plot: {str(e)}")
+        # Fallback to waterfall plot if force plot fails
+        st.warning(f"Force plot failed, using waterfall plot instead: {str(e)}")
+        return create_shap_waterfall_plot(explainer, shap_values, X_test, student_iloc)
+
+def create_shap_waterfall_plot(explainer, shap_values, X_test, student_iloc):
+    """Create SHAP waterfall plot as fallback."""
+    try:
+        instance_features = X_test.iloc[student_iloc, :]
+        
+        if isinstance(shap_values, list) and len(shap_values) == 2:
+            instance_shap_values = shap_values[1][student_iloc, :]
+            base_value = explainer.expected_value[1]
+        else:
+            instance_shap_values = shap_values[student_iloc, :]
+            base_value = explainer.expected_value
+        
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        # Create waterfall plot
+        shap.plots.waterfall(
+            shap.Explanation(
+                values=instance_shap_values,
+                base_values=base_value,
+                data=instance_features.values,
+                feature_names=instance_features.index.tolist()
+            ),
+            show=False
+        )
+        
+        plt.tight_layout()
+        return fig
+        
+    except Exception as e:
+        st.error(f"Both force and waterfall plots failed: {str(e)}")
         return None
 
 def create_shap_summary_plot(shap_values, X_test):
     """Create SHAP summary plot with error handling."""
     try:
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(10, 8))
         
         # Handle different SHAP value formats
         if isinstance(shap_values, list) and len(shap_values) == 2:
-            shap_values_to_use = shap_values[1]
+            shap_values_to_use = shap_values[1]  # Use positive class for binary classification
         else:
             shap_values_to_use = shap_values
             
@@ -176,7 +212,7 @@ def main():
     accuracy = accuracy_score(y_test, y_pred)
     
     # Initialize SHAP explainer
-    with st.spinner("Initializing explainer..."):
+    with st.spinner("Initializing SHAP explainer..."):
         explainer = initialize_explainer(model, X_train)
         shap_values = explainer.shap_values(X_test)
 
@@ -186,7 +222,7 @@ def main():
     
     selected_student_index = st.sidebar.selectbox(
         "Select student for individual prediction analysis:",
-        options=X_test.index,
+        options=list(X_test.index)[:20],  # Limit to first 20 for demo
         format_func=lambda x: f"Student #{x}"
     )
 
@@ -230,22 +266,24 @@ def main():
                 non_zero_features.to_frame().rename(columns={selected_student_index: 'Value'}),
                 height=400
             )
-        else:
-            st.write("All feature values are 0 for this student.")
 
     with col2:
         st.subheader("Individual Explanation")
         st.markdown("""
-        The force plot below shows how each feature influences the model's prediction for this specific student. 
-        Red features push toward a positive prediction (pass), while blue features push toward negative (fail).
+        The plot below shows how each feature influences the model's prediction for this specific student. 
+        Positive values push toward passing, while negative values push toward failing.
         """)
         
         # Create and display SHAP force plot
         student_iloc = X_test.index.get_loc(selected_student_index)
-        force_plot_fig = create_shap_force_plot(explainer, shap_values, X_test, student_iloc)
+        
+        with st.spinner("Creating individual explanation plot..."):
+            force_plot_fig = create_shap_force_plot(explainer, shap_values, X_test, student_iloc)
         
         if force_plot_fig is not None:
             st.pyplot(force_plot_fig, clear_figure=True)
+        else:
+            st.error("Could not generate individual explanation plot.")
         
         st.subheader("Global Model Explanation")
         st.markdown("""
@@ -254,10 +292,13 @@ def main():
         """)
         
         # Create and display SHAP summary plot
-        summary_plot_fig = create_shap_summary_plot(shap_values, X_test)
+        with st.spinner("Creating global explanation plot..."):
+            summary_plot_fig = create_shap_summary_plot(shap_values, X_test)
         
         if summary_plot_fig is not None:
             st.pyplot(summary_plot_fig, clear_figure=True)
+        else:
+            st.error("Could not generate global explanation plot.")
 
     # Additional information
     with st.expander("Model and Dataset Information"):
@@ -280,14 +321,6 @@ def main():
             - Features: Demographics, family, school, and social factors
             - Total Samples: {} students
             """.format(len(df)))
-
-        st.markdown("""
-        **Feature Categories:**
-        - **Demographic**: Age, gender, urban/rural residence
-        - **Family**: Parents' education, jobs, family relationships
-        - **Academic**: Study time, past failures, course selection
-        - **Social**: Free time activities, alcohol consumption, health status
-        """)
 
 if __name__ == "__main__":
     main()
