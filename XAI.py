@@ -1,341 +1,190 @@
-diff --git a/XAI.py b/XAI.py
-index b823039e3886ed438c80d51364a2a48156dded02..2261a72695b223b69de5c8806bd7aae5f3c0245c 100644
---- a/XAI.py
-+++ b/XAI.py
-@@ -1,159 +1,257 @@
- # app.py
- # To run this app:
- # 1. Save this code as `app.py`.
- # 2. Make sure you have a `requirements.txt` file (I'll provide this).
- # 3. In your terminal, run: `streamlit run app.py`
- 
--import streamlit as st
--import pandas as pd
--import numpy as np
--import shap
--import matplotlib.pyplot as plt
--from sklearn.ensemble import RandomForestClassifier
--from sklearn.model_selection import train_test_split
--from sklearn.preprocessing import StandardScaler
-+import streamlit as st
-+import pandas as pd
-+import numpy as np
-+import shap
-+import matplotlib.pyplot as plt
-+from sklearn.ensemble import RandomForestClassifier
-+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
-+from sklearn.model_selection import train_test_split
- 
- # --- Page Configuration ---
- st.set_page_config(
-     page_title="Student Performance XAI",
-     page_icon="🎓",
-     layout="wide",
-     initial_sidebar_state="expanded"
- )
- 
- # --- Caching Functions for Performance ---
- @st.cache_data
- def load_data():
-     """Loads the student performance dataset."""
-     try:
-         # Assuming 'student-por.csv' is in the same directory as the app.py file.
-         # If you deploy, make sure to upload this CSV to your repository.
-         df = pd.read_csv('student-por.csv', encoding='utf-8')
-         df.columns = df.columns.str.strip()
-         return df
-     except FileNotFoundError:
-         st.error("Dataset file 'student-por.csv' not found. Please place it in the same directory as the app.")
-         return None
- 
- @st.cache_data
- def preprocess_data(_df):
-     """Preprocesses the data: creates target, encodes features, and splits."""
-     df = _df.copy()
-     # Create the binary target variable 'pass'
-     df['pass'] = df['G3'].apply(lambda x: 1 if x >= 10 else 0)
-     df.drop(['G1', 'G2', 'G3'], axis=1, inplace=True)
-     
-     # One-hot encode categorical features
-     df_encoded = pd.get_dummies(df, drop_first=True)
-     
-     X = df_encoded.drop('pass', axis=1)
-     y = df_encoded['pass']
-     
-     # Split data for model training and explanation
-     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-     
-     return X_train, X_test, y_train, y_test, X.columns, X
- 
--@st.cache_resource
--def train_model(X_train, y_train):
--    """Trains the RandomForestClassifier model."""
--    # Using the best parameters from your notebook for demonstration
--    model = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42, class_weight='balanced')
--    model.fit(X_train, y_train)
--    return model
-+@st.cache_resource
-+def train_model(X_train, y_train):
-+    """Trains the RandomForestClassifier model."""
-+    model = RandomForestClassifier(
-+        n_estimators=200,
-+        max_depth=10,
-+        random_state=42,
-+        class_weight="balanced",
-+    )
-+    model.fit(X_train, y_train)
-+    return model
- 
- # --- Main App UI ---
--st.title("🎓 Explainable AI for Student Performance Prediction")
--st.write(
--    "This interactive application demonstrates how Explainable AI (XAI) can make machine learning models transparent. "
--    "The underlying Random Forest model predicts whether a student will pass or fail based on demographic, social, and school-related features. "
--    "Using **SHAP (SHapley Additive exPlanations)**, we can see *why* the model makes a specific prediction."
--)
-+plt.style.use("seaborn-v0_8")
-+
-+st.markdown(
-+    """
-+    <style>
-+        .main {
-+            background: radial-gradient(circle at top, #1a2a6c, #16213e 25%, #0f172a 60%, #050816 100%);
-+            color: #f8fafc;
-+        }
-+        section[data-testid="stSidebar"] {
-+            background-color: #111827 !important;
-+            border-right: 1px solid rgba(148, 163, 184, 0.3);
-+        }
-+        .stApp header {background: rgba(15, 23, 42, 0.7);}
-+        .feature-card {
-+            padding: 1.2rem 1.5rem;
-+            border-radius: 1rem;
-+            background: rgba(30, 41, 59, 0.85);
-+            border: 1px solid rgba(148, 163, 184, 0.2);
-+            box-shadow: 0 18px 30px -25px rgba(148, 163, 184, 0.8);
-+        }
-+        .metric-card {
-+            padding: 0.8rem 1rem;
-+            border-radius: 0.9rem;
-+            background: rgba(15, 23, 42, 0.75);
-+            border: 1px solid rgba(94, 234, 212, 0.35);
-+        }
-+        div[data-testid="stMetricValue"] {
-+            color: #5eead4;
-+            font-weight: 700;
-+        }
-+        div[data-testid="stMetricLabel"] {
-+            color: #cbd5f5;
-+            text-transform: uppercase;
-+            letter-spacing: 0.08em;
-+            font-size: 0.8rem;
-+        }
-+        .student-table .stDataFrame div[role="table"] {
-+            border-radius: 0.75rem;
-+            overflow: hidden;
-+        }
-+    </style>
-+    """,
-+    unsafe_allow_html=True,
-+)
-+
-+st.title("🎓 Explainable AI for Student Performance Prediction")
-+st.caption(
-+    "Understand how individual student characteristics influence the probability of passing the course. "
-+    "Explore transparent model explanations powered by SHAP to support equitable academic decisions."
-+)
- 
- # --- Load and Process Data ---
- df = load_data()
- 
- if df is not None:
-     X_train, X_test, y_train, y_test, feature_names, X = preprocess_data(df)
-     
-     # Train the model
--    model = train_model(X_train, y_train)
--
--    # Initialize SHAP explainer
--    explainer = shap.TreeExplainer(model)
--    shap_values = explainer.shap_values(X_test)
-+    model = train_model(X_train, y_train)
-+
-+    # Evaluate performance once so we can display summary metrics
-+    y_pred = model.predict(X_test)
-+    y_proba = model.predict_proba(X_test)[:, 1]
-+    accuracy = accuracy_score(y_test, y_pred)
-+    precision = precision_score(y_test, y_pred, zero_division=0)
-+    recall = recall_score(y_test, y_pred, zero_division=0)
-+    f1 = f1_score(y_test, y_pred, zero_division=0)
-+    roc_auc = roc_auc_score(y_test, y_proba)
-+
-+    # Initialize SHAP explainer using the modern API
-+    explainer = shap.TreeExplainer(model)
-+    shap_explanation = explainer(X_test)
-+    shap_pass = shap_explanation[..., 1]
- 
-     # --- Sidebar for User Input ---
--    st.sidebar.header("Explore a Prediction")
--    selected_student_index = st.sidebar.selectbox(
--        "Select a student from the test set to explain:",
--        options=X_test.index,
--        format_func=lambda x: f"Student Index {x}"
--    )
-+    st.sidebar.header("Explore a Prediction")
-+    selected_student_index = st.sidebar.selectbox(
-+        "Select a student from the test set to explain:",
-+        options=X_test.index,
-+        format_func=lambda x: f"Student Index {x}"
-+    )
-+
-+    st.sidebar.markdown("---")
-+    st.sidebar.subheader("Model Snapshot")
-+    st.sidebar.write(
-+        "The model is a 200-tree Random Forest with class balancing to better capture students who might fail."
-+    )
- 
-     # --- Main Content Area ---
--    col1, col2 = st.columns([1, 2])
-+    st.subheader("Model Performance")
-+    perf_cols = st.columns(5)
-+    metrics = [
-+        ("Accuracy", f"{accuracy:.2%}"),
-+        ("Precision", f"{precision:.2%}"),
-+        ("Recall", f"{recall:.2%}"),
-+        ("F1 Score", f"{f1:.2%}"),
-+        ("ROC AUC", f"{roc_auc:.2f}"),
-+    ]
-+    for col, (label, value) in zip(perf_cols, metrics):
-+        with col:
-+            st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-+            st.metric(label=label, value=value)
-+            st.markdown("</div>", unsafe_allow_html=True)
-+
-+    st.markdown("""<div class='feature-card'>""", unsafe_allow_html=True)
-+    col1, col2 = st.columns([1, 1.6])
- 
-     with col1:
--        st.subheader("Prediction for Student {}".format(selected_student_index))
--        
--        # Get prediction and probability
--        prediction = model.predict(X_test.loc[[selected_student_index]])[0]
--        probability = model.predict_proba(X_test.loc[[selected_student_index]])[0][1]
-+        st.subheader("Prediction for Student {}".format(selected_student_index))
-+
-+        # Get prediction and probability
-+        prediction = model.predict(X_test.loc[[selected_student_index]])[0]
-+        probability = model.predict_proba(X_test.loc[[selected_student_index]])[0][1]
- 
-         if prediction == 1:
-             st.success(f"**Prediction: PASS** (Probability: {probability:.2%})")
-         else:
-             st.error(f"**Prediction: FAIL** (Probability of Passing: {probability:.2%})")
-         
-         st.write("---")
--        st.subheader("Student's Key Features:")
--        
--        # Display the features of the selected student
--        student_features = X.loc[[selected_student_index]].T.rename(columns={selected_student_index: 'Value'})
--        st.dataframe(student_features, height=350)
-+        st.subheader("Student's Key Features:")
-+
-+        # Display the features of the selected student
-+        student_features = (
-+            X.loc[[selected_student_index]]
-+            .T.rename(columns={selected_student_index: "Value"})
-+            .sort_values(by="Value", ascending=False)
-+        )
-+        st.markdown("<div class='student-table'>", unsafe_allow_html=True)
-+        st.dataframe(student_features, height=380, use_container_width=True)
-+        st.markdown("</div>", unsafe_allow_html=True)
- 
- 
-     with col2:
-         st.subheader("Local Explanation: Why this prediction?")
-         st.write(
-             "This **SHAP Force Plot** shows the features that pushed the model's prediction higher (in red) or lower (in blue). "
-             "The 'base value' is the average prediction over the entire dataset."
-         )
-         
--        # We need to find the index in the numpy array that corresponds to the student's original index
--        student_iloc = X_test.index.get_loc(selected_student_index)
--        
--        # Generate SHAP force plot for the selected student
--        # We explain the model's output for the "Pass" class (class 1)
--        shap_plot = shap.force_plot(
--            explainer.expected_value[1], 
--            shap_values[1][student_iloc, :], 
--            X_test.iloc[student_iloc, :],
--            matplotlib=True,
--            show=False
--        )
--        st.pyplot(shap_plot, bbox_inches='tight')
--        st.write("---")
--        st.subheader("Global Explanation: What drives the model?")
--        st.write(
--            "This summary plot ranks the features by their overall importance to the model's predictions across all students. "
--            "Longer bars indicate more influential features."
--        )
--        
--        # Generate SHAP summary plot
--        fig, ax = plt.subplots()
--        shap.summary_plot(shap_values[1], X_test, plot_type="bar", show=False)
--        st.pyplot(fig, bbox_inches='tight', clear_figure=True)
--
--
--    # --- Expander for more details ---
--    with st.expander("About the Model and Data"):
--        st.markdown("""
--        - **Model:** A `RandomForestClassifier` trained on a dataset of Portuguese students.
--        - **Target:** Predicts if a student's final grade (G3) is >= 10 (Pass) or < 10 (Fail).
--        - **Features:** Include student demographics (`sex`, `age`), family background (`Pstatus`, `Medu`, `Fedu`), school-related factors (`studytime`, `failures`, `absences`), and social aspects (`goout`, `health`).
--        - **Explainability:** SHAP values quantify the impact of each feature on a particular prediction, providing crucial transparency.
--        """)
--else:
--    st.info("Please upload the 'student-por.csv' dataset to proceed.")
-+        # We need to find the index in the numpy array that corresponds to the student's original index
-+        student_iloc = X_test.index.get_loc(selected_student_index)
-+
-+        # Generate SHAP waterfall plot for the selected student
-+        waterfall_ax = shap.plots.waterfall(
-+            shap_pass[student_iloc],
-+            max_display=12,
-+            show=False,
-+        )
-+        st.pyplot(waterfall_ax.figure, use_container_width=True)
-+        plt.close(waterfall_ax.figure)
-+        st.write("---")
-+        st.subheader("Global Explanation: What drives the model?")
-+        st.write(
-+            "This summary plot ranks the features by their overall importance to the model's predictions across all students. "
-+            "Longer bars indicate more influential features."
-+        )
-+
-+        # Generate SHAP summary and beeswarm plots
-+        bar_ax = shap.plots.bar(shap_pass, max_display=12, show=False)
-+        st.pyplot(bar_ax.figure, use_container_width=True)
-+        plt.close(bar_ax.figure)
-+
-+        beeswarm_ax = shap.plots.beeswarm(shap_pass, max_display=15, show=False)
-+        st.pyplot(beeswarm_ax.figure, use_container_width=True)
-+        plt.close(beeswarm_ax.figure)
-+
-+
-+    st.markdown("""</div>""", unsafe_allow_html=True)
-+
-+    st.divider()
-+
-+    # --- Expander for more details ---
-+    with st.expander("About the Model and Data"):
-+        st.markdown(
-+            """
-+            - **Model:** A `RandomForestClassifier` trained on Portuguese secondary school student data.
-+            - **Target:** Predicts if a student's final grade (G3) is >= 10 (Pass) or < 10 (Fail).
-+            - **Features:** Include student demographics (`sex`, `age`), family background (`Pstatus`, `Medu`, `Fedu`), school-related factors (`studytime`, `failures`, `absences`), and social aspects (`goout`, `health`).
-+            - **Explainability:** SHAP values quantify the impact of each feature on a particular prediction, providing crucial transparency for data-informed interventions.
-+            """
-+        )
-+
-+        st.markdown("### Data Preview")
-+        st.dataframe(df.head(10))
-+else:
-+    st.info("Please upload the 'student-por.csv' dataset to proceed.")
+# app.py
+# Run: streamlit run app.py
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import shap
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+
+# ---------- Page config & theming ----------
+st.set_page_config(
+    page_title="Student Performance XAI",
+    page_icon="🎓",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# Light CSS tweaks for a cleaner look
+st.markdown(
+    """
+    <style>
+    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
+    .metric-card {border:1px solid rgba(255,255,255,0.1); border-radius:16px; padding:16px;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ---------- Data helpers ----------
+@st.cache_data
+def load_data(path: str = "student-por.csv"):
+    try:
+        df = pd.read_csv(path, encoding="utf-8")
+        df.columns = df.columns.str.strip()
+        return df
+    except FileNotFoundError:
+        st.error("Dataset file 'student-por.csv' not found. Upload it in the sidebar or place it next to app.py.")
+        return None
+
+@st.cache_data
+def preprocess(df: pd.DataFrame):
+    df = df.copy()
+    # Target: pass if G3 >= 10
+    df["pass"] = (df["G3"] >= 10).astype(int)
+    df.drop(["G1", "G2", "G3"], axis=1, inplace=True)
+
+    # One-hot encode categoricals
+    df_enc = pd.get_dummies(df, drop_first=True)
+
+    X = df_enc.drop("pass", axis=1)
+    y = df_enc["pass"]
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+    return X_train, X_test, y_train, y_test
+
+@st.cache_resource
+def train_model(X_train, y_train):
+    model = RandomForestClassifier(
+        n_estimators=200, max_depth=10, random_state=42, class_weight="balanced"
+    )
+    model.fit(X_train, y_train)
+    return model
+
+# ---------- Sidebar: data input ----------
+st.sidebar.header("Data")
+uploaded = st.sidebar.file_uploader("Upload student-por.csv (optional)", type=["csv"]) 
+
+df = load_data(uploaded) if uploaded else load_data()
+
+st.title("🎓 Explainable AI for Student Performance Prediction")
+st.caption(
+    "Random Forest model to predict pass/fail with SHAP explanations."
+)
+
+if df is None:
+    st.stop()
+
+X_train, X_test, y_train, y_test = preprocess(df)
+model = train_model(X_train, y_train)
+
+# Use the *unified* SHAP API to avoid DimensionError and backend mismatches.
+# This returns an Explanation object that's stable across SHAP versions.
+@st.cache_resource
+def build_explainers(X_train, model):
+    explainer = shap.Explainer(model, X_train, feature_names=X_train.columns)
+    return explainer
+
+explainer = build_explainers(X_train, model)
+
+# Precompute global explanations once (fast enough for RF, cached by Streamlit)
+@st.cache_resource
+def compute_global_explanation(explainer, X_test):
+    return explainer(X_test)
+
+shap_global = compute_global_explanation(explainer, X_test)
+
+# ---------- Sidebar: choose a student ----------
+st.sidebar.header("Explore a Prediction")
+selected_idx = st.sidebar.selectbox(
+    "Select a student from the test set to explain:",
+    options=list(X_test.index),
+    format_func=lambda i: f"Student Index {i}",
+)
+
+# ---------- Layout ----------
+left, right = st.columns([1, 2])
+
+with left:
+    st.subheader(f"Prediction for Student {selected_idx}")
+    row = X_test.loc[[selected_idx]]
+    pred = model.predict(row)[0]
+    proba = model.predict_proba(row)[0][1]
+
+    # small, card-like metrics
+    _c1, _c2 = st.columns(2)
+    with _c1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.metric("Prediction", "PASS" if pred == 1 else "FAIL")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with _c2:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.metric("P(pass)", f"{proba:.1%}")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.write("---")
+    st.subheader("Student's Key Features")
+    st.dataframe(row.T.rename(columns={selected_idx: "Value"}), height=360)
+
+with right:
+    st.subheader("Local Explanation: Why this prediction?")
+    st.write(
+        "Waterfall plot shows top feature contributions that pushed the prediction up or down from the base value."
+    )
+
+    # Compute local explanation *only* for the selected row for speed
+    shap_local = explainer(row)
+
+    # SHAP matplotlib plots render into the current figure; manage figures explicitly
+    fig1, ax1 = plt.subplots(figsize=(8, 5))
+    try:
+        shap.plots.waterfall(shap_local[0], max_display=12, show=False)
+        st.pyplot(fig1, bbox_inches="tight")
+    except Exception as e:
+        plt.close(fig1)
+        st.warning(
+            "Couldn't render waterfall due to a SHAP/matplotlib quirk. Falling back to force plot (static)."
+        )
+        fig2, ax2 = plt.subplots(figsize=(8, 3))
+        # Fallback: simple bar of local contributions
+        vals = pd.Series(shap_local.values[0], index=row.columns).sort_values(key=abs, ascending=False)[:12]
+        ax2.barh(vals.index[::-1], vals.values[::-1])
+        ax2.set_xlabel("SHAP value (impact on model output)")
+        st.pyplot(fig2, bbox_inches="tight")
+
+    st.write("---")
+    st.subheader("Global Explanation: What drives the model?")
+    st.write("Bar plot of mean |SHAP| values across the test set.")
+
+    fig3, ax3 = plt.subplots(figsize=(8, 5))
+    shap.plots.bar(shap_global, max_display=15, show=False)
+    st.pyplot(fig3, bbox_inches="tight")
+
+with st.expander("About the Model and Data"):
+    st.markdown(
+        """
+        - **Model**: RandomForestClassifier (200 trees, max depth 10, class_weight=balanced)
+        - **Target**: `pass` (1 if G3 ≥ 10, else 0)
+        - **Explainability**: SHAP unified API (`shap.Explainer`) for stable plots.
+        - **Tips**: If plots ever break after upgrading SHAP, pin versions (see requirements.txt).
+        """
+    )
+
+# ---------- End of app ----------
+
+
+# ---------------- requirements.txt ----------------
+# Save the below as requirements.txt next to app.py
+# (Keep versions pinned to avoid SHAP/Matplotlib backend mismatches.)
+
+"""
+streamlit==1.36.0
+pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.3.2
+matplotlib==3.8.4
+shap==0.44.1
+"""
