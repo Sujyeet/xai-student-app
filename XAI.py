@@ -84,11 +84,11 @@ model = train_model(X_train, y_train)
 # Use the *unified* SHAP API to avoid DimensionError and backend mismatches.
 # This returns an Explanation object that's stable across SHAP versions.
 @st.cache_resource
-def build_explainers(X_train, model):
-    explainer = shap.Explainer(model, X_train, feature_names=X_train.columns)
-    return explainer
+def build_explainers():
+    # No-arg cached factory avoids hashing unhashable params (model/DataFrame)
+    return shap.Explainer(model, X_train, feature_names=X_train.columns)
 
-explainer = build_explainers(X_train, model)
+explainer = build_explainers()
 
 # Precompute global explanations once (fast enough for RF, cached by Streamlit)
 @st.cache_resource
